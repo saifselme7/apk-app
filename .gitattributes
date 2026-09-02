@@ -1,2 +1,0 @@
-base.apk filter=lfs diff=lfs merge=lfs -text
-1xbet_1.0.apk filter=lfs diff=lfs merge=lfs -text
