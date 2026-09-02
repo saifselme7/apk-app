@@ -151,9 +151,10 @@ export function MirrorPanel({ connection, mirror }: MirrorPanelProps) {
       {!mirror.active && (
         <p className="mt-3 border-t border-slate-800 pt-3 text-xs leading-relaxed text-slate-500">
           Running fully offline — no Firebase calls are made. The local demo generator
-          remains fully functional without Firebase. To observe the real demo database
-          read-only, copy <code className="text-slate-400">.env.example</code> to{' '}
-          <code className="text-slate-400">.env</code> and fill in the values (see README).
+          remains fully functional without Firebase. For the read-only live mirror, copy{' '}
+          <code className="text-slate-400">.env.example</code> to{' '}
+          <code className="text-slate-400">.env</code> — only the database URL is required
+          (no API key needed for this read-only mirror).
         </p>
       )}
     </aside>

@@ -53,9 +53,16 @@ VITE_FIREBASE_APP_ID=
 
 Two modes:
 
-1. **Offline demo mode (default when `VITE_FIREBASE_API_KEY` is empty)** —
-   zero Firebase network activity. Everything (grid, rounds, online-user
+1. **Offline demo mode (when `VITE_FIREBASE_DATABASE_URL` is unset/invalid)**
+   — zero Firebase network activity. Everything (grid, rounds, online-user
    counter) is simulated locally, and the demo generator works fully.
+   **Only the database URL is required for live mode**: copy
+   `.env.example` to `.env` as-is and the mirror works — no API key, no
+   Firebase console access needed. The RTDB connection authorizes per
+   security rules (the demo database is publicly readable, verified by an
+   unauthenticated REST read in Phase 4); an API key is only used by other
+   Firebase services and is never required here. All other
+   `VITE_FIREBASE_*` values are optional passthroughs.
 2. **Read-only live mode** — with the required values present
    (`apiKey`, `databaseURL`, `projectId`), the console attaches a
    **read-only** `onValue` listener to `/m11` (m1–m50). Every snapshot is

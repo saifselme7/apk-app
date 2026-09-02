@@ -13,11 +13,19 @@ export const FIREBASE_ENV = {
   appId: 'VITE_FIREBASE_APP_ID',
 } as const
 
-/** Minimum required values for the read-only demo integration (RTDB only). */
+/**
+ * Minimum required value for the READ-ONLY Realtime Database integration.
+ *
+ * The Firebase JS SDK's RTDB connection is made to the database instance
+ * named in the URL and authenticates per security rules — an API key /
+ * project id are NOT part of the RTDB wire protocol and are only needed
+ * for other Firebase services (Auth, Firestore, …). The demo database
+ * allows public reads of /m11 (verified by an unauthenticated REST read in
+ * Phase 4), so a databaseURL-only initialization is sufficient here.
+ * All other VITE_FIREBASE_* values remain optional passthroughs.
+ */
 export const REQUIRED_FIREBASE_ENV: readonly string[] = [
-  FIREBASE_ENV.apiKey,
   FIREBASE_ENV.databaseURL,
-  FIREBASE_ENV.projectId,
 ]
 
 /** The single node this demo is ever allowed to touch. */

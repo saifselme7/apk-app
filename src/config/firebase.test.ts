@@ -17,12 +17,8 @@ describe('firebase config contract', () => {
     expect(names.every((name) => name.startsWith('VITE_FIREBASE_'))).toBe(true)
   })
 
-  it('requires apiKey, databaseURL and projectId at minimum', () => {
-    expect(REQUIRED_FIREBASE_ENV).toEqual([
-      FIREBASE_ENV.apiKey,
-      FIREBASE_ENV.databaseURL,
-      FIREBASE_ENV.projectId,
-    ])
+  it('requires exactly the database URL for the read-only RTDB integration', () => {
+    expect(REQUIRED_FIREBASE_ENV).toEqual([FIREBASE_ENV.databaseURL])
   })
 
   it('forbids every node owned by the demo Android client', () => {
