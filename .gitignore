@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+dist-ssr/
+
+# test coverage
+coverage/
+
+# env files — never commit real configuration (only the example is tracked)
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.local
+npm-debug.log*
+yarn-error.log*
