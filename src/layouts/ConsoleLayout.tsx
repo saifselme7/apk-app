@@ -15,9 +15,9 @@ export function ConsoleLayout({ header, children }: ConsoleLayoutProps) {
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-10 pt-5 sm:pt-6">{children}</main>
       <footer className="border-t border-slate-800/80 px-4 py-4">
         <p className="mx-auto max-w-5xl text-center text-[11px] leading-relaxed text-slate-600">
-          Apple Console · standalone demo simulation of an operator grid tool · Firebase
-          publishing disabled (phase 2) · /m11 contract ready · not affiliated with any
-          betting platform
+          Apple Console · standalone demo simulation of an operator grid tool ·
+          publishing only via NEW GAME · /m11 contract enforced · not affiliated
+          with any betting platform
         </p>
       </footer>
     </div>

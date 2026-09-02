@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 import {
   GRID_ROWS,
   REVEAL_ROW_DELAY_MS,
@@ -14,9 +14,11 @@ import { ActionButtons } from '../components/ActionButtons'
 import { GameGrid } from '../components/GameGrid'
 import { MirrorPanel } from '../components/MirrorPanel'
 import { ConsoleLayout } from '../layouts/ConsoleLayout'
-import { generateDemoRound } from '../utils/generator'
+import { generateDemoRound, nodeToRows } from '../utils/generator'
 import { liveValuesToRows } from '../utils/m11Snapshot'
 import { prefersReducedMotion } from '../utils/random'
+import { validateM11Node } from '../utils/validation'
+import { publishDemoRound } from '../services/m11'
 import type { ConsoleRound, RoundPhase, RoundSource } from '../types/game'
 
 export interface ConsoleProps {
@@ -30,44 +32,61 @@ const START_MESSAGES = [
   'Validating round contract…',
 ] as const
 
-/** SCREEN 2 — the operator console (grid + ladder + START/SHOW).
- *
- * Two strictly separated data sources:
- * - LIVE mode  — Firebase configured AND /m11 currently valid (50/50):
- *   START freezes the observed snapshot into the round. No local
- *   generation happens, so the grid mirrors exactly what APP 2 reads.
- * - DEMO mode  — otherwise: the local demo generator (clearly labelled).
- */
+const BADGE_LABELS: Record<RoundSource, string> = {
+  live: 'Firebase — Read Only',
+  published: 'Firebase — Published',
+  demo: 'Demo / Local Simulation',
+}
+
+const BADGE_CLASSES: Record<RoundSource, string> = {
+  live: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
+  published: 'border-sky-400/40 bg-sky-400/10 text-sky-300',
+  demo: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+}
+
+const BADGE_DOTS: Record<RoundSource, string> = {
+  live: 'bg-emerald-400',
+  published: 'bg-sky-400',
+  demo: 'bg-amber-400',
+}
+
+const BADGE_TITLES: Record<RoundSource, string> = {
+  live: 'Grid mirrors the observed read-only /m11 snapshot (same data APP 2 reads)',
+  published: 'This round was generated locally and published to /m11 — APP 2 receives the same round',
+  demo: 'Locally generated simulation data — not from Firebase',
+}
+
+/** SCREEN 2 — the operator console (grid + ladder + actions + SHOW). */
 export function Console({ operatorId, onLogout }: ConsoleProps) {
   const [phase, setPhase] = useState<RoundPhase>('idle')
   const [round, setRound] = useState<ConsoleRound | null>(null)
   const [revealedRows, setRevealedRows] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
   const [messageIndex, setMessageIndex] = useState(0)
+  const [publishMessage, setPublishMessage] = useState<string | null>(null)
 
   const onlineUsers = useSimulatedOnlineUsers()
   const connection = useFirebaseConnection()
   const mirror = useM11Mirror()
 
-  // LIVE mode is only entered with a complete, contract-valid snapshot.
+  const configured = mirror.active
+  // LIVE load is only offered with a complete, contract-valid snapshot.
   const liveReady =
     mirror.active && mirror.status === 'valid' && mirror.evaluation !== null
 
-  // What START will use next / what the badge shows when no round is held.
   const nextSource: RoundSource = liveReady ? 'live' : 'demo'
-  // The badge always reflects the round actually on screen, if there is one.
   const badgeSource: RoundSource = round?.source ?? nextSource
 
   // LOAD LIVE ROUND — freeze the observed read-only /m11 snapshot.
-  // Never generates; replaces whatever round is held, wholesale.
+  // Never generates; never writes; replaces the held round wholesale.
   const handleLoadLive = useCallback(() => {
-    if (phase === 'generating' || phase === 'revealing') return
+    if (phase === 'generating' || phase === 'revealing' || phase === 'publishing') return
     if (!liveReady || !mirror.evaluation) return
     setError(null)
+    setSuccess(null)
     setRevealedRows(0)
 
-    // The snapshot is already subscribed locally — load it instantly.
-    // No random generation, no Firebase interaction of any kind.
     try {
       setRound({
         source: 'live',
@@ -83,12 +102,61 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
     }
   }, [phase, liveReady, mirror.evaluation, mirror.lastUpdated])
 
-  // NEW DEMO ROUND — local simulation only; completely independent from
-  // Firebase (never read for this path, never written). Replaces the
-  // previous held round wholesale.
-  const handleNewDemo = useCallback(() => {
-    if (phase === 'generating' || phase === 'revealing') return
+  // NEW GAME — the ONLY Firebase write in the app:
+  // generate ONCE → validate → publish the SAME node → freeze the SAME node.
+  // On failure: previous confirmed round stays intact, clear error, manual retry.
+  const handleNewGame = useCallback(async () => {
+    if (phase === 'generating' || phase === 'revealing' || phase === 'publishing') return
+    if (!configured) return
+    const previousPhase = phase
+    const previousRound = round
     setError(null)
+    setSuccess(null)
+    setPublishMessage('Generating 50 cells…')
+    setPhase('publishing')
+
+    try {
+      // 1. Generate exactly once.
+      const candidate = generateDemoRound()
+
+      // 2. Validate locally BEFORE publishing (belt and braces — the
+      //    generator already validates; the service validates again).
+      setPublishMessage('Validating round…')
+      const check = validateM11Node(candidate.node)
+      if (!check.valid) {
+        throw new Error(`Generated round failed validation: ${check.errors.join(' ')}`)
+      }
+
+      // 3. Publish the SAME validated node to /m11 (single atomic update).
+      setPublishMessage('Publishing to Firebase…')
+      await publishDemoRound(candidate.node)
+
+      // 4. Freeze the exact published object — never regenerated.
+      setRound({
+        source: 'published',
+        seed: candidate.seed,
+        createdAt: Date.now(),
+        rows: nodeToRows(candidate.node),
+      })
+      setRevealedRows(0)
+      setPhase('ready')
+      setPublishMessage(null)
+      setSuccess('New game published successfully.')
+    } catch (cause) {
+      // Keep the previous confirmed round; no auto-retry, no fake success.
+      console.error('[demo] NEW GAME failed', cause)
+      setPublishMessage(null)
+      setRound(previousRound)
+      setPhase(previousRound ? 'ready' : previousPhase === 'idle' ? 'idle' : 'idle')
+      setError('Publish failed — current round was not replaced. Try NEW GAME again.')
+    }
+  }, [phase, round, configured])
+
+  // NEW DEMO ROUND — offline-only local fallback; never publishes.
+  const handleNewDemo = useCallback(() => {
+    if (phase === 'generating' || phase === 'revealing' || phase === 'publishing') return
+    setError(null)
+    setSuccess(null)
     setRound(null)
     setRevealedRows(0)
     setMessageIndex(0)
@@ -100,7 +168,6 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
         setRound({ source: 'demo', seed: next.seed, createdAt: next.createdAt, rows: next.rows })
         setPhase('ready')
       } catch (cause) {
-        // Details stay in the console log; the UI shows a friendly message.
         console.error('[demo] generator failure', cause)
         setPhase('idle')
         setError('The demo generator failed to create a valid round. Please try again.')
@@ -108,7 +175,7 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
     }, START_SIMULATION_MS)
   }, [phase])
 
-  // Cycle the loading messages while "connecting" (visual parity, clearly a demo).
+  // Cycle the loading messages while a local demo round generates.
   useEffect(() => {
     if (phase !== 'generating') return
     const id = window.setInterval(() => {
@@ -117,17 +184,16 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
     return () => window.clearInterval(id)
   }, [phase])
 
-  // Live state consistency: when a NEWER valid snapshot arrives while a live
-  // round is held but not yet revealed, replace it WHOLESALE (never mix an
-  // old round with new data). During revealing/revealed the round stays
-  // frozen so the SHOW animation cannot change halfway through; a hint is
-  // shown instead and the next START picks the newest snapshot up.
+  // Live state consistency: when a NEWER valid snapshot arrives while a
+  // live/published round is held but not yet shown, replace it WHOLESALE
+  // (never mix rounds). During revealing/revealed the round stays FROZEN so
+  // SHOW cannot change halfway through; a hint points at the newer data.
   useEffect(() => {
     if (!liveReady || !mirror.evaluation) return
-    if (phase === 'ready' && round?.source === 'live') {
+    if (phase === 'ready' && (round?.source === 'live' || round?.source === 'published')) {
       try {
         setRound({
-          source: 'live',
+          source: round.source,
           createdAt: mirror.lastUpdated ?? Date.now(),
           rows: liveValuesToRows(mirror.evaluation.values),
         })
@@ -138,15 +204,16 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mirror.evaluation])
 
-  // SHOW — begin the progressive reveal.
+  // SHOW — begin the progressive reveal of the frozen round.
   const handleShow = useCallback(() => {
     if (phase !== 'ready' || round === null) return
+    setError(null)
+    setSuccess(null)
     setPhase('revealing')
     setRevealedRows(0)
   }, [phase, round])
 
-  // Progressive reveal: one row at a time, bottom (row 1) → top (row 10),
-  // exactly like the original app's Show. The round stays stable throughout.
+  // Progressive reveal: one row at a time, bottom (row 1) → top (row 10).
   useEffect(() => {
     if (phase !== 'revealing') return
     if (revealedRows >= GRID_ROWS) {
@@ -165,9 +232,8 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
     [round],
   )
 
-  // A newer snapshot arrived while the held live round is frozen mid/after SHOW.
   const newerSnapshotAvailable =
-    round?.source === 'live' &&
+    (round?.source === 'live' || round?.source === 'published') &&
     mirror.lastUpdated !== null &&
     round.createdAt !== null &&
     mirror.lastUpdated > round.createdAt &&
@@ -176,18 +242,24 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
   function statusLine(): string {
     if (phase === 'idle') {
       return liveReady
-        ? 'Live /m11 snapshot available — load it, or start a new demo round.'
-        : 'No round yet — start a new demo round.'
+        ? 'Live /m11 snapshot available — load it, or start a NEW GAME.'
+        : configured
+          ? 'No round yet — start a NEW GAME (publishes to /m11).'
+          : 'No round yet — start a new demo round.'
     }
     if (phase === 'generating') return 'Preparing demo round…'
+    if (phase === 'publishing') return publishMessage ?? 'Publishing new game…'
     if (phase === 'ready') {
-      return round?.source === 'live'
-        ? 'Live /m11 round loaded — press SHOW to reveal it.'
-        : 'Demo round ready — press SHOW to reveal it.'
+      if (round?.source === 'live') return 'Live /m11 round loaded — press SHOW to reveal it.'
+      if (round?.source === 'published')
+        return 'New game published successfully — press SHOW to reveal it.'
+      return 'Demo round ready — press SHOW to reveal it.'
     }
     if (phase === 'revealing') return 'Revealing result…'
+    if (round?.source === 'published')
+      return 'Published round complete — start another NEW GAME when ready.'
     return round?.source === 'live'
-      ? 'Live round complete — load the current /m11 again or start a new demo round.'
+      ? 'Live round complete — load the current /m11 again or start a NEW GAME.'
       : 'Demo round complete — start another new demo round.'
   }
 
@@ -216,35 +288,27 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
           <div className="flex flex-wrap items-center gap-2">
             {newerSnapshotAvailable && (
               <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-0.5 text-[11px] font-semibold text-cyan-200">
-                Newer /m11 snapshot received — reload with START
+                Newer /m11 snapshot received — load it or start a NEW GAME
               </span>
             )}
             <span
               data-testid="data-source-badge"
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${
-                badgeSource === 'live'
-                  ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300'
-                  : 'border-amber-400/40 bg-amber-400/10 text-amber-300'
-              }`}
-              title={
-                badgeSource === 'live'
-                  ? 'Grid mirrors the observed read-only /m11 snapshot (same data APP 2 reads)'
-                  : 'Locally generated simulation data — not from Firebase'
-              }
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${BADGE_CLASSES[badgeSource]}`}
+              title={BADGE_TITLES[badgeSource]}
             >
               <span
                 aria-hidden="true"
-                className={`h-1.5 w-1.5 rounded-full ${
-                  badgeSource === 'live' ? 'bg-emerald-400' : 'bg-amber-400'
-                }`}
+                className={`h-1.5 w-1.5 rounded-full ${BADGE_DOTS[badgeSource]}`}
               />
-              {badgeSource === 'live' ? 'Firebase — Read Only' : 'Demo / Local Simulation'}
+              {BADGE_LABELS[badgeSource]}
             </span>
             {round && (
               <p className="text-xs tabular-nums text-slate-600">
                 {round.source === 'live'
                   ? `live /m11 · received ${new Date(round.createdAt).toLocaleTimeString()}`
-                  : `seed ${round.seed} · generated ${new Date(round.createdAt).toLocaleTimeString()}`}
+                  : round.source === 'published'
+                    ? `seed ${round.seed} · published ${new Date(round.createdAt).toLocaleTimeString()}`
+                    : `seed ${round.seed} · generated ${new Date(round.createdAt).toLocaleTimeString()}`}
               </p>
             )}
           </div>
@@ -253,8 +317,10 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
         <ActionButtons
           phase={phase}
           liveReady={liveReady}
+          firebaseConfigured={configured}
           onLoadLive={handleLoadLive}
-          onNewDemo={handleNewDemo}
+          onNewGame={handleNewGame}
+          onNewDemo={configured ? null : handleNewDemo}
           onShow={handleShow}
         />
 
@@ -268,7 +334,17 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
           </p>
         )}
 
-        {/* Generating overlay message (demo mode only — live START is instant) */}
+        {success && phase !== 'publishing' && (
+          <p
+            role="status"
+            className="flex items-start gap-2 rounded-xl border border-sky-400/30 bg-sky-400/10 px-4 py-3 text-sm font-medium text-sky-200 animate-fade-in"
+          >
+            <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+            {success}
+          </p>
+        )}
+
+        {/* Generating message (offline local demo only) */}
         {phase === 'generating' && (
           <p className="flex items-center justify-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-center text-sm font-medium text-cyan-200 animate-pulse-soft">
             {START_MESSAGES[messageIndex]}
@@ -278,11 +354,24 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
           </p>
         )}
 
+        {/* Publishing progress (NEW GAME) */}
+        {phase === 'publishing' && (
+          <p
+            data-testid="publish-status"
+            className="flex items-center justify-center gap-2 rounded-xl border border-sky-400/25 bg-sky-400/5 px-4 py-3 text-center text-sm font-medium text-sky-200 animate-pulse-soft"
+          >
+            {publishMessage ?? 'Publishing new game…'}
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              (writes /m11 once)
+            </span>
+          </p>
+        )}
+
         <GameGrid
           rows={round?.rows ?? null}
           phase={phase}
           revealedRows={revealedRows}
-          nextSource={nextSource}
+          nextSource={liveReady ? 'live' : 'demo'}
         />
 
         {/* Reveal progress */}

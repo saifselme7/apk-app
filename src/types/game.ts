@@ -40,7 +40,7 @@ export interface DemoRound {
 }
 
 /** Where the round displayed by the console came from. */
-export type RoundSource = 'demo' | 'live'
+export type RoundSource = 'demo' | 'live' | 'published'
 
 /**
  * The round held by the console for START/SHOW.
@@ -56,8 +56,14 @@ export interface ConsoleRound {
   readonly seed?: number
 }
 
-/** Console phase state machine. */
-export type RoundPhase = 'idle' | 'generating' | 'ready' | 'revealing' | 'revealed'
+/** Console phase state machine. 'publishing' = NEW GAME is writing /m11. */
+export type RoundPhase =
+  | 'idle'
+  | 'generating'
+  | 'publishing'
+  | 'ready'
+  | 'revealing'
+  | 'revealed'
 
 /** Firebase connection status for the UI. */
 export type FirebaseConnectionState =

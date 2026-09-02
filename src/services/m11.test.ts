@@ -1,10 +1,27 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { generateDemoRound } from '../utils/generator'
+import { validateM11Node } from '../utils/validation'
+import type { M11Node } from '../types/game'
+
+const updateMock = vi.hoisted(() => vi.fn())
+const refMock = vi.hoisted(() => vi.fn((_db: unknown, path: string) => ({ path })))
+const getDemoDatabaseMock = vi.hoisted(() => vi.fn(() => ({ key: 'demo-db' })))
+
+vi.mock('firebase/database', () => ({
+  onValue: () => () => undefined,
+  ref: refMock,
+  update: updateMock,
+}))
+
+vi.mock('./firebase', () => ({
+  getDemoDatabase: getDemoDatabaseMock,
+}))
+
 import {
+  InvalidRoundError,
   M11_PUBLISHING_ENABLED,
-  PublishingDisabledError,
   assertM11ChildPath,
   publishDemoRound,
 } from './m11'
@@ -19,80 +36,144 @@ function collectSourceFiles(dir: string): string[] {
   })
 }
 
-describe('M11 service — phase boundary', () => {
-  it('keeps publishing disabled in this phase', () => {
-    expect(M11_PUBLISHING_ENABLED).toBe(false)
+function validNode(): M11Node {
+  return generateDemoRound(1).node
+}
+
+beforeEach(() => {
+  updateMock.mockReset()
+  refMock.mockClear()
+  getDemoDatabaseMock.mockClear()
+})
+
+afterEach(() => {
+  vi.clearAllMocks()
+})
+
+describe('M11 service — publishing (single guarded write path)', () => {
+  it('has publishing enabled exclusively for the NEW GAME action', () => {
+    expect(M11_PUBLISHING_ENABLED).toBe(true)
   })
 
-  it('publishDemoRound refuses to touch Firebase while publishing is disabled', async () => {
-    const round = generateDemoRound(1)
-    await expect(publishDemoRound(round.node)).rejects.toBeInstanceOf(PublishingDisabledError)
+  it('publishes a VALID round as ONE atomic update at the fixed path /m11', async () => {
+    const node = validNode()
+    await publishDemoRound(node)
+
+    expect(getDemoDatabaseMock).toHaveBeenCalledTimes(1)
+    expect(refMock).toHaveBeenCalledWith({ key: 'demo-db' }, 'm11')
+    expect(updateMock).toHaveBeenCalledTimes(1)
+    // The exact node passed in is the exact node written — never regenerated.
+    expect(updateMock).toHaveBeenCalledWith(expect.anything(), node)
   })
 
-  it('never uses destructive SDK calls (set/remove) anywhere in the service source', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/services/m11.ts'), 'utf-8')
-    expect(source).not.toMatch(/\.\s*set\s*\(/)
-    expect(source).not.toMatch(/\.\s*remove\s*\(/)
+  it('publishes only a contract-valid node (validates BEFORE any SDK call)', async () => {
+    const broken = validNode() as unknown as Record<string, unknown>
+    delete broken.m27
+    await expect(publishDemoRound(broken as unknown as M11Node)).rejects.toBeInstanceOf(
+      InvalidRoundError,
+    )
+    expect(updateMock).not.toHaveBeenCalled()
+    expect(refMock).not.toHaveBeenCalled()
+    expect(getDemoDatabaseMock).not.toHaveBeenCalled()
   })
 
-  it('contains NO Firebase write API call in ANY production source file', () => {
-    // Static audit as a permanent test:
-    // 1. every firebase/database import must only name READ APIs;
-    // 2. no file may reference transaction or disconnect-registration APIs;
-    // 3. the Firebase service files must not call set/update/remove at all.
-    const readOnlyIdentifiers = new Set([
-      'onValue',
-      'get',
-      'getDatabase',
-      'ref',
-      'query',
-      'Unsubscribe',
-      'DataSnapshot',
-      'Database',
-      'onChildAdded',
-      'onChildChanged',
-    ])
+  it('the published payload itself passes the contract validator', async () => {
+    const node = validNode()
+    await publishDemoRound(node)
+    const written = updateMock.mock.calls[0][1] as M11Node
+    expect(validateM11Node(written)).toEqual({ valid: true })
+    expect(Object.keys(written)).toHaveLength(50)
+  })
+})
+
+describe('M11 service — static write audit', () => {
+  it('contains exactly ONE Firebase write API in production code, in m11.ts', () => {
     const files = collectSourceFiles(resolve(process.cwd(), 'src'))
     expect(files.length).toBeGreaterThan(10)
-
+    const generatorPath = resolve(process.cwd(), 'src/utils/generator.ts')
+    const writeHits: string[] = []
     for (const file of files) {
       const source = readFileSync(file, 'utf-8')
-
-      const importMatch = source.match(
-        /import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'firebase\/database'/,
-      )
-      if (importMatch) {
-        const identifiers = importMatch[1]
-          .split(',')
-          .map((part) => part.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0].trim())
-          .filter(Boolean)
-        for (const identifier of identifiers) {
-          expect(
-            readOnlyIdentifiers.has(identifier),
-            `${file} imports "${identifier}" from firebase/database — only read APIs are allowed`,
-          ).toBe(true)
+      const writeTests: ReadonlyArray<[string, RegExp]> = [
+        ['set(', /\.\s*set\s*\(/],
+        ['update(', /(?:^|[^\w.])update\s*\(/],
+        ['remove(', /\.\s*remove\s*\(/],
+        ['runTransaction(', /runTransaction\s*\(/],
+        ['onDisconnect', /onDisconnect/],
+      ]
+      for (const [label, pattern] of writeTests) {
+        if (pattern.test(source)) {
+          // Sole tolerated exception: the LOCAL JavaScript Map.set in the
+          // generator (that file imports nothing from Firebase — verified
+          // by the import-allowlist test below).
+          if (file === generatorPath && label === 'set(') continue
+          writeHits.push(`${file}: ${label}`)
         }
       }
+    }
+    // The single allowed Firebase write: update() in the guarded publish path.
+    expect(writeHits).toEqual([expect.stringContaining('src/services/m11.ts: update(')])
+  })
 
+  it('never uses destructive or background-write APIs anywhere (set/remove/transaction/onDisconnect)', () => {
+    const files = collectSourceFiles(resolve(process.cwd(), 'src'))
+    const generatorPath = resolve(process.cwd(), 'src/utils/generator.ts')
+    const generatorSource = readFileSync(generatorPath, 'utf-8')
+    // generator.ts has zero Firebase imports — its .set( is a local Map method.
+    expect(generatorSource).not.toMatch(/^import\s+.*firebase/m)
+    for (const file of files) {
+      const source = readFileSync(file, 'utf-8')
+      if (file !== generatorPath) {
+        expect(source, `${file} must not call .set()`).not.toMatch(/\.\s*set\s*\(/)
+      }
+      expect(source, `${file} must not call .remove()`).not.toMatch(/\.\s*remove\s*\(/)
       expect(source, `${file} must not reference transactions`).not.toContain('runTransaction')
       expect(source, `${file} must not register disconnect handlers`).not.toContain(
         'onDisconnect',
       )
     }
+  })
 
-    for (const serviceFile of ['src/services/m11.ts', 'src/services/firebase.ts']) {
-      const source = readFileSync(resolve(process.cwd(), serviceFile), 'utf-8')
-      expect(source, `${serviceFile} must not call .set()`).not.toMatch(/\.\s*set\s*\(/)
-      expect(source, `${serviceFile} must not call .update()`).not.toMatch(/\.\s*update\s*\(/)
-      expect(source, `${serviceFile} must not call .remove()`).not.toMatch(/\.\s*remove\s*\(/)
+  it('the connection/firebase service stays strictly read-only', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/services/firebase.ts'), 'utf-8')
+    expect(source).not.toMatch(/\.\s*update\s*\(/)
+    const importLine = source.split('\n').find((line) => line.includes("from 'firebase/database'"))
+    expect(importLine).not.toContain('update')
+  })
+
+  it('firebase/database imports are limited to the read + single-update allowlist', () => {
+    const allowed = new Set([
+      'onValue', 'get', 'getDatabase', 'ref', 'query', 'update',
+      'Unsubscribe', 'DataSnapshot', 'Database', 'onChildAdded', 'onChildChanged',
+    ])
+    const files = collectSourceFiles(resolve(process.cwd(), 'src'))
+    for (const file of files) {
+      const source = readFileSync(file, 'utf-8')
+      const importMatch = source.match(
+        /import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'firebase\/database'/,
+      )
+      if (!importMatch) continue
+      const identifiers = importMatch[1]
+        .split(',')
+        .map((part) => part.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0].trim())
+        .filter(Boolean)
+      for (const identifier of identifiers) {
+        expect(
+          allowed.has(identifier),
+          `${file} imports "${identifier}" from firebase/database — not in the allowlist`,
+        ).toBe(true)
+      }
     }
   })
 
-  it('imports only read APIs from the firebase/database SDK in the m11 service', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/services/m11.ts'), 'utf-8')
-    const importLine = source.split('\n').find((line) => line.includes("from 'firebase/database'"))
-    expect(importLine).toBeDefined()
-    expect(importLine).toMatch(/\{\s*onValue,\s*ref/)
+  it('no REST write calls (fetch/XHR POST/PUT/PATCH) to Firebase in production code', () => {
+    const files = collectSourceFiles(resolve(process.cwd(), 'src'))
+    for (const file of files) {
+      const source = readFileSync(file, 'utf-8')
+      expect(source, `${file} must not call fetch()`).not.toMatch(/\bfetch\s*\(/)
+      expect(source, `${file} must not use XHR`).not.toContain('XMLHttpRequest')
+      expect(source, `${file} must not REST-write`).not.toMatch(/method:\s*'(POST|PUT|PATCH|DELETE)'/)
+    }
   })
 })
 

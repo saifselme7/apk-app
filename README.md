@@ -85,28 +85,32 @@ Two modes:
    app contains no Firebase write call at all (statically audited by a
    unit test that scans the whole `src/` tree).
 
-### Grid data source (Phase 5A + explicit dual actions)
+### Grid data sources & NEW GAME publishing
 
-The console has two strictly separated data sources, always shown by the
-badge next to the status line, with **one explicit action each**:
+The console offers explicit, clearly separated actions. The badge next to
+the status line always names the source of the round on screen:
 
 - **LOAD LIVE ROUND** → **"Firebase — Read Only"** (green badge): enabled
-  when Firebase is configured **and** `/m11` is currently valid (50/50
-  keys). It freezes the observed snapshot into the round — nothing is
-  generated — so the grid mirrors **exactly** what the Android demo client
-  displays. SHOW reveals that frozen snapshot progressively. If a newer
-  snapshot arrives while the live round is held but not yet shown, it is
-  replaced wholesale; during a reveal the round stays frozen (a hint
-  points out newer data).
-- **NEW DEMO ROUND** → **"Demo / Local Simulation"** (amber badge): always
-  available (except mid-generation/mid-reveal). Generates a fresh local
-  round with the demo generator — completely independent from Firebase
-  (never read for this path, never written) — and SHOW reveals it. A new
-  demo round replaces the previous held round wholesale; live snapshots
-  arriving mid-reveal never mutate it.
+  when `/m11` is currently valid (50/50). Freezes the observed snapshot —
+  nothing is generated, nothing is written — so the grid mirrors exactly
+  what APP 2 displays. Newer snapshots replace a held (not yet shown)
+  round wholesale; mid-reveal the round stays frozen.
+- **NEW GAME** → **"Firebase — Published"** (blue badge): the ONLY Firebase
+  write in the app. Chain: generate ONCE (APP 1's audited curve
+  1,1,1,1,2,2,2,2,2,4) → validate locally → publish the SAME validated
+  node to `/m11` as ONE atomic multi-path `update()` (single server
+  commit — APP 2's child listener can never observe a partial round) →
+  freeze the SAME node → SHOW reveals exactly what was published. On
+  failure the previous confirmed round is kept, a clear error is shown,
+  and there is no automatic retry. APP 2 receives the new round through
+  its existing listener, unmodified.
+- **NEW DEMO ROUND** → **"Demo / Local Simulation"** (amber badge):
+  offline-only fallback (shown when Firebase is not configured); local
+  generation only, never publishes.
 
-Locally generated data is never presented as Firebase data. Firebase stays
-strictly read-only: no write path exists anywhere in the app.
+Publishing happens exclusively on an explicit NEW GAME click — never on
+load, login, LOAD LIVE, SHOW, listener updates, re-renders, or refresh
+(enforced by tests and the static write audit).
 
 Never commit `.env`. Only placeholders belong in `.env.example`.
 
@@ -123,8 +127,9 @@ and crashes on a missing child. Any future publishing must satisfy:
 - never write `/main`, `/xbetmoney`, `/users`, `/bet1`, `/data` — those
   nodes belong to the demo client.
 
-All writes (once a later phase enables them) go through the single guarded
-service `src/services/m11.ts`, which enforces the path allowlist above.
+All writes go through the single guarded service `src/services/m11.ts`
+(the NEW GAME path only), which validates the round and writes only
+`/m11`.
 The generator's safe-cell curve per row is `1, 1, 1, 1, 2, 2, 2, 2, 2, 4`
 (row 1 easiest ×1.23 … row 10 ×349.68). This is **exactly the original
 operator app's algorithm** (Phase-1 audit F4, smali-verified: rows 1–4

@@ -21,6 +21,18 @@ vi.mock('../services/firebase', () => ({
   },
 }))
 
+
+// Publishing must NEVER happen in offline mode (and never on these paths).
+const publishMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+vi.mock('../services/m11', () => ({
+  subscribeToM11Sync: () => () => undefined,
+  publishDemoRound: publishMock,
+}))
+
+afterEach(() => {
+  publishMock.mockClear()
+})
+
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
@@ -67,15 +79,18 @@ describe('Console screen', () => {
     expect(screen.getByText(/no real money · no wagering/i)).toBeInTheDocument()
     expect(screen.getAllByText(/Offline demo mode/i).length).toBeGreaterThan(0)
     expect(screen.getByText('Publishing')).toBeInTheDocument()
-    expect(screen.getByText(/Disabled \(phase boundary\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/NEW GAME only \(guarded\)/i)).toBeInTheDocument()
   })
 
   it('SHOW is disabled before a round exists; LOAD LIVE ROUND is disabled offline', () => {
     render(<Console operatorId="op-1" onLogout={vi.fn()} />)
     expect(screen.getByRole('button', { name: /show/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /new demo round/i })).toBeEnabled()
-    // Offline: there is no live round to load.
+    // Offline: there is no live round to load and no Firebase to publish to.
     expect(screen.getByRole('button', { name: /load live round/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /new game/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /new demo round/i })).toBeEnabled()
+    expect(publishMock).not.toHaveBeenCalled()
   })
 
   it('NEW DEMO ROUND generates a validated 50-position round and then enables SHOW', () => {
@@ -213,6 +228,23 @@ describe('Console screen', () => {
         expectedCell === '1' ? 'safe' : 'bomb',
       )
     }
+    expect(screen.getByText(/18 safe cells/i)).toBeInTheDocument()
+  })
+
+  it('offline mode never publishes and keeps the local demo generator as fallback', () => {
+    render(<Console operatorId="op-1" onLogout={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /new demo round/i }))
+    act(() => {
+      vi.advanceTimersByTime(START_SIMULATION_MS)
+    })
+    fireEvent.click(screen.getByRole('button', { name: /show/i }))
+    for (let i = 0; i < 12; i += 1) {
+      act(() => {
+        vi.advanceTimersByTime(REVEAL_ROW_DELAY_MS)
+      })
+    }
+    expect(publishMock).not.toHaveBeenCalled()
     expect(screen.getByText(/18 safe cells/i)).toBeInTheDocument()
   })
 

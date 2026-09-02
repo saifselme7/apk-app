@@ -136,8 +136,8 @@ export function GameGrid({ rows, phase, revealedRows, nextSource = 'demo' }: Gam
           </p>
           <p className="max-w-xs text-xs text-slate-500">
             {nextSource === 'live'
-              ? 'The grid will mirror exactly what the Android demo client reads from Firebase — or use NEW DEMO ROUND for a local simulation. Nothing is written either way.'
-              : 'Nothing is written anywhere — results stay in this browser until publishing is explicitly enabled in a later phase.'}
+              ? 'The grid will mirror exactly what the Android demo client reads from Firebase — or start a NEW GAME to publish a fresh round (APP 2 receives it automatically).'
+              : 'Nothing is written anywhere — results stay in this browser (offline demo mode).'}
           </p>
         </div>
       )}

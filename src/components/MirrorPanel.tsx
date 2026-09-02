@@ -1,4 +1,4 @@
-import { Lock, RefreshCw, ShieldCheck, Wifi, WifiOff } from 'lucide-react'
+import { RefreshCw, Rocket, ShieldCheck, Wifi, WifiOff } from 'lucide-react'
 import type { FirebaseConnectionState } from '../types/game'
 import type { M11MirrorState, M11MirrorStatus } from '../hooks/useM11Mirror'
 
@@ -82,9 +82,9 @@ export function MirrorPanel({ connection, mirror }: MirrorPanelProps) {
         </div>
         <div className="flex justify-between gap-4">
           <dt>Publishing</dt>
-          <dd className="inline-flex items-center gap-1.5 text-right font-medium text-amber-300">
-            <Lock aria-hidden="true" className="h-3.5 w-3.5" />
-            Disabled (phase boundary)
+          <dd className="inline-flex items-center gap-1.5 text-right font-medium text-sky-300">
+            <Rocket aria-hidden="true" className="h-3.5 w-3.5" />
+            NEW GAME only (guarded)
           </dd>
         </div>
       </dl>

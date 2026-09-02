@@ -42,10 +42,10 @@ describe('MirrorPanel — connection states', () => {
     expect(screen.getByText(pattern)).toBeInTheDocument()
   })
 
-  it('always shows publishing as disabled (phase boundary)', () => {
+  it('always shows publishing as guarded (NEW GAME only)', () => {
     render(<MirrorPanel connection="connected" mirror={mirrorState({})} />)
     expect(screen.getByText('Publishing')).toBeInTheDocument()
-    expect(screen.getByText(/Disabled \(phase boundary\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/NEW GAME only \(guarded\)/i)).toBeInTheDocument()
   })
 })
 
