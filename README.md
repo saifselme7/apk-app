@@ -78,6 +78,24 @@ Two modes:
    app contains no Firebase write call at all (statically audited by a
    unit test that scans the whole `src/` tree).
 
+### Grid data source (Phase 5A)
+
+The console has two strictly separated data sources, always shown by the
+badge next to the status line:
+
+- **Firebase — Read Only** (green): entered when Firebase is configured
+  **and** `/m11` is currently valid (50/50 keys). START freezes the
+  observed snapshot into the round — nothing is generated — so the grid
+  mirrors **exactly** what the Android demo client displays. SHOW reveals
+  that frozen snapshot progressively. If a newer snapshot arrives while
+  the round is held but not yet shown, it is replaced wholesale; during a
+  reveal the round stays frozen (a hint points out newer data).
+- **Demo / Local Simulation** (amber): used whenever Firebase is not
+  configured or `/m11` is empty/incomplete/invalid. START uses the local
+  demo generator and the round is clearly labelled as simulated.
+
+Locally generated data is never presented as Firebase data.
+
 Never commit `.env`. Only placeholders belong in `.env.example`.
 
 ## The /m11 contract (frozen — do not break)

@@ -1,5 +1,5 @@
-import { M_KEYS } from '../config/game'
-import type { M11Value, MKey } from '../types/game'
+import { M_KEYS, ROWS } from '../config/game'
+import type { M11Value, MKey, RowView } from '../types/game'
 import { validateM11Child } from './validation'
 
 /** Aggregate sync status of the observed /m11 node. */
@@ -68,4 +68,30 @@ export function evaluateM11Snapshot(raw: unknown): M11SyncEvaluation {
           : 'valid'
 
   return { status, present, missing, invalid, values, safeCount }
+}
+
+/**
+ * Maps an observed (validated) /m11 snapshot to the 10-row grid view —
+ * the exact same m1…m50 → row/column mapping the grid uses for local
+ * rounds, so a live round and APP 2 render identical cells.
+ *
+ * Only complete value maps are accepted (status "valid"): if any of the
+ * 50 keys is missing, this throws rather than inventing a value.
+ */
+export function liveValuesToRows(
+  values: Readonly<Partial<Record<MKey, M11Value>>>,
+): RowView[] {
+  return ROWS.map((spec) => ({
+    row: spec.row,
+    multiplier: spec.multiplier,
+    cells: spec.keys.map((key) => {
+      const value = values[key]
+      if (value === undefined) {
+        throw new Error(
+          `Live /m11 snapshot is missing a value for "${key}" — refusing to invent one.`,
+        )
+      }
+      return { key, value }
+    }),
+  }))
 }

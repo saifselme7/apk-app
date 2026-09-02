@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { M_KEYS } from '../config/game'
 import type { M11Node } from '../types/game'
 import { generateDemoRound } from './generator'
-import { evaluateM11Snapshot } from './m11Snapshot'
+import { evaluateM11Snapshot, liveValuesToRows } from './m11Snapshot'
 
 /** Hand-built valid node (independent of the generator). */
 function validNode(): M11Node {
@@ -93,6 +93,48 @@ describe('evaluateM11Snapshot — missing mN keys', () => {
     const result = evaluateM11Snapshot({ m50: { m50: '1' } })
     expect(result.status).toBe('incomplete')
     expect(result.missing).toHaveLength(49)
+  })
+})
+
+describe('liveValuesToRows — /m11 snapshot → grid mapping', () => {
+  it('maps a complete valid snapshot to exactly 50 cells in row order (m1…m50)', () => {
+    const values: Partial<Record<(typeof M_KEYS)[number], '0' | '1'>> = {}
+    for (const key of M_KEYS) values[key] = '0'
+    values.m1 = '1'
+
+    const rows = liveValuesToRows(values)
+    expect(rows).toHaveLength(10)
+    const cells = rows.flatMap((row) => row.cells)
+    expect(cells).toHaveLength(50)
+    expect(cells.map((cell) => cell.key)).toEqual([...M_KEYS])
+    expect(cells.filter((cell) => cell.value === '1').map((cell) => cell.key)).toEqual(['m1'])
+    // Row mapping: row N owns m(5N-4)…m(5N) with its multiplier attached.
+    expect(rows[0].row).toBe(1)
+    expect(rows[0].multiplier).toBe(1.23)
+    expect(rows[0].cells.map((cell) => cell.key)).toEqual(['m1', 'm2', 'm3', 'm4', 'm5'])
+    expect(rows[9].cells.map((cell) => cell.key)).toEqual(['m46', 'm47', 'm48', 'm49', 'm50'])
+    expect(rows[9].multiplier).toBe(349.68)
+  })
+
+  it('round-trips the Phase-4 live snapshot through the evaluator into rows unchanged', () => {
+    const live = Object.fromEntries(
+      M_KEYS.map((key, index) => [key, { [key]: index % 3 === 0 ? '1' : '0' }]),
+    )
+    const evaluation = evaluateM11Snapshot(live)
+    expect(evaluation.status).toBe('valid')
+    const rows = liveValuesToRows(evaluation.values)
+    for (const row of rows) {
+      for (const cell of row.cells) {
+        expect(cell.value).toBe(live[cell.key][cell.key])
+      }
+    }
+  })
+
+  it('refuses to map an incomplete value map (never invents cells)', () => {
+    const values: Partial<Record<(typeof M_KEYS)[number], '0' | '1'>> = {}
+    for (const key of M_KEYS) values[key] = '0'
+    delete values.m25
+    expect(() => liveValuesToRows(values)).toThrow(/missing a value for "m25"/)
   })
 })
 

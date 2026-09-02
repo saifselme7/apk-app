@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import { Apple, Bomb } from 'lucide-react'
 import { GRID_ROWS, ROWS } from '../config/game'
-import type { RoundPhase, RowView } from '../types/game'
+import type { RoundPhase, RoundSource, RowView } from '../types/game'
 import { MultiplierRung } from './MultiplierLadder'
 
 type CellState = 'empty' | 'hidden' | 'safe' | 'bomb'
@@ -55,6 +55,8 @@ export interface GameGridProps {
   phase: RoundPhase
   /** How many rows (from row 1 upward) have been revealed. */
   revealedRows: number
+  /** What START will load next — used only for the idle hint text. */
+  nextSource?: RoundSource
 }
 
 /**
@@ -63,7 +65,7 @@ export interface GameGridProps {
  * The grid is a display surface (not interactive), exactly like the
  * original operator console.
  */
-export function GameGrid({ rows, phase, revealedRows }: GameGridProps) {
+export function GameGrid({ rows, phase, revealedRows, nextSource = 'demo' }: GameGridProps) {
   const hasRound = rows !== null
   // Display top row first (row 10 → row 1).
   const displayRows = [...(rows ?? placeholderRows())].reverse()
@@ -120,11 +122,22 @@ export function GameGrid({ rows, phase, revealedRows }: GameGridProps) {
             />
           </svg>
           <p className="max-w-xs text-sm font-medium text-slate-300">
-            Press <span className="font-bold text-cyan-300">START</span> to generate a demo round.
+            {nextSource === 'live' ? (
+              <>
+                Press <span className="font-bold text-emerald-300">START</span> to load the
+                current live /m11 round.
+              </>
+            ) : (
+              <>
+                Press <span className="font-bold text-cyan-300">START</span> to generate a demo
+                round.
+              </>
+            )}
           </p>
           <p className="max-w-xs text-xs text-slate-500">
-            Nothing is written anywhere — results stay in this browser until publishing is
-            explicitly enabled in a later phase.
+            {nextSource === 'live'
+              ? 'The grid will mirror exactly what the Android demo client reads from Firebase — nothing is written.'
+              : 'Nothing is written anywhere — results stay in this browser until publishing is explicitly enabled in a later phase.'}
           </p>
         </div>
       )}

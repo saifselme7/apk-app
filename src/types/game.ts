@@ -39,6 +39,23 @@ export interface DemoRound {
   readonly rows: readonly RowView[]
 }
 
+/** Where the round displayed by the console came from. */
+export type RoundSource = 'demo' | 'live'
+
+/**
+ * The round held by the console for START/SHOW.
+ * - 'demo': generated locally by the demo generator (offline simulation).
+ * - 'live': a frozen copy of the observed read-only /m11 snapshot —
+ *   exactly the same 50 cells APP 2 displays.
+ */
+export interface ConsoleRound {
+  readonly source: RoundSource
+  readonly createdAt: number
+  readonly rows: readonly RowView[]
+  /** Demo rounds carry their PRNG seed; live rounds carry the seed's absence. */
+  readonly seed?: number
+}
+
 /** Console phase state machine. */
 export type RoundPhase = 'idle' | 'generating' | 'ready' | 'revealing' | 'revealed'
 

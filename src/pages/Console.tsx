@@ -15,8 +15,9 @@ import { GameGrid } from '../components/GameGrid'
 import { MirrorPanel } from '../components/MirrorPanel'
 import { ConsoleLayout } from '../layouts/ConsoleLayout'
 import { generateDemoRound } from '../utils/generator'
+import { liveValuesToRows } from '../utils/m11Snapshot'
 import { prefersReducedMotion } from '../utils/random'
-import type { DemoRound, RoundPhase } from '../types/game'
+import type { ConsoleRound, RoundPhase, RoundSource } from '../types/game'
 
 export interface ConsoleProps {
   operatorId: string
@@ -29,18 +30,17 @@ const START_MESSAGES = [
   'Validating round contract…',
 ] as const
 
-const PHASE_STATUS: Record<RoundPhase, string> = {
-  idle: 'No round yet — press START.',
-  generating: 'Preparing demo round…',
-  ready: 'Round ready — press SHOW to reveal it.',
-  revealing: 'Revealing result…',
-  revealed: 'Round complete — press START for a new round.',
-}
-
-/** SCREEN 2 — the operator console (grid + ladder + START/SHOW). */
+/** SCREEN 2 — the operator console (grid + ladder + START/SHOW).
+ *
+ * Two strictly separated data sources:
+ * - LIVE mode  — Firebase configured AND /m11 currently valid (50/50):
+ *   START freezes the observed snapshot into the round. No local
+ *   generation happens, so the grid mirrors exactly what APP 2 reads.
+ * - DEMO mode  — otherwise: the local demo generator (clearly labelled).
+ */
 export function Console({ operatorId, onLogout }: ConsoleProps) {
   const [phase, setPhase] = useState<RoundPhase>('idle')
-  const [round, setRound] = useState<DemoRound | null>(null)
+  const [round, setRound] = useState<ConsoleRound | null>(null)
   const [revealedRows, setRevealedRows] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [messageIndex, setMessageIndex] = useState(0)
@@ -49,19 +49,48 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
   const connection = useFirebaseConnection()
   const mirror = useM11Mirror()
 
-  // START — generate a complete demo round locally (never touches Firebase).
+  // LIVE mode is only entered with a complete, contract-valid snapshot.
+  const liveReady =
+    mirror.active && mirror.status === 'valid' && mirror.evaluation !== null
+
+  // What START will use next / what the badge shows when no round is held.
+  const nextSource: RoundSource = liveReady ? 'live' : 'demo'
+  // The badge always reflects the round actually on screen, if there is one.
+  const badgeSource: RoundSource = round?.source ?? nextSource
+
+  // START — in live mode freeze the observed snapshot; never generate.
   const handleStart = useCallback(() => {
     if (phase === 'generating' || phase === 'revealing') return
     setError(null)
-    setRound(null)
     setRevealedRows(0)
+
+    if (liveReady && mirror.evaluation) {
+      // The snapshot is already subscribed locally — load it instantly.
+      // No random generation, no Firebase interaction of any kind.
+      try {
+        setRound({
+          source: 'live',
+          createdAt: mirror.lastUpdated ?? Date.now(),
+          rows: liveValuesToRows(mirror.evaluation.values),
+        })
+        setPhase('ready')
+      } catch (cause) {
+        console.error('[demo] live snapshot mapping failed', cause)
+        setRound(null)
+        setPhase('idle')
+        setError('The live /m11 snapshot could not be mapped onto the grid. No data was changed.')
+      }
+      return
+    }
+
+    // DEMO mode — existing local simulation.
+    setRound(null)
     setMessageIndex(0)
     setPhase('generating')
-
     window.setTimeout(() => {
       try {
         const next = generateDemoRound()
-        setRound(next)
+        setRound({ source: 'demo', seed: next.seed, createdAt: next.createdAt, rows: next.rows })
         setPhase('ready')
       } catch (cause) {
         // Details stay in the console log; the UI shows a friendly message.
@@ -70,7 +99,7 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
         setError('The demo generator failed to create a valid round. Please try START again.')
       }
     }, START_SIMULATION_MS)
-  }, [phase])
+  }, [phase, liveReady, mirror.evaluation, mirror.lastUpdated])
 
   // Cycle the loading messages while "connecting" (visual parity, clearly a demo).
   useEffect(() => {
@@ -80,6 +109,27 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
     }, START_SIMULATION_MS / (START_MESSAGES.length + 1))
     return () => window.clearInterval(id)
   }, [phase])
+
+  // Live state consistency: when a NEWER valid snapshot arrives while a live
+  // round is held but not yet revealed, replace it WHOLESALE (never mix an
+  // old round with new data). During revealing/revealed the round stays
+  // frozen so the SHOW animation cannot change halfway through; a hint is
+  // shown instead and the next START picks the newest snapshot up.
+  useEffect(() => {
+    if (!liveReady || !mirror.evaluation) return
+    if (phase === 'ready' && round?.source === 'live') {
+      try {
+        setRound({
+          source: 'live',
+          createdAt: mirror.lastUpdated ?? Date.now(),
+          rows: liveValuesToRows(mirror.evaluation.values),
+        })
+      } catch {
+        /* keep the previously held round — never partial updates */
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mirror.evaluation])
 
   // SHOW — begin the progressive reveal.
   const handleShow = useCallback(() => {
@@ -108,6 +158,32 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
     [round],
   )
 
+  // A newer snapshot arrived while the held live round is frozen mid/after SHOW.
+  const newerSnapshotAvailable =
+    round?.source === 'live' &&
+    mirror.lastUpdated !== null &&
+    round.createdAt !== null &&
+    mirror.lastUpdated > round.createdAt &&
+    (phase === 'revealing' || phase === 'revealed')
+
+  function statusLine(): string {
+    if (phase === 'idle') {
+      return liveReady
+        ? 'Live /m11 snapshot available — press START to load it.'
+        : 'No round yet — press START.'
+    }
+    if (phase === 'generating') return 'Preparing demo round…'
+    if (phase === 'ready') {
+      return round?.source === 'live'
+        ? 'Live /m11 round loaded — press SHOW to reveal it.'
+        : 'Demo round ready — press SHOW to reveal it.'
+    }
+    if (phase === 'revealing') return 'Revealing result…'
+    return round?.source === 'live'
+      ? 'Live round complete — press START to reload the current /m11.'
+      : 'Round complete — press START for a new round.'
+  }
+
   return (
     <ConsoleLayout
       header={
@@ -120,22 +196,51 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
       }
     >
       <div className="space-y-5">
-        {/* Round status line */}
+        {/* Round status line + explicit data-source badge */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p aria-live="polite" className="text-sm font-medium text-slate-300">
-            {PHASE_STATUS[phase]}
+            {statusLine()}
             {phase === 'revealed' && (
               <span className="ml-2 rounded-full bg-emerald-400/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-300">
                 {safeCellCount} safe cells
               </span>
             )}
           </p>
-          {round && (
-            <p className="text-xs tabular-nums text-slate-600">
-              seed {round.seed} · generated{' '}
-              {new Date(round.createdAt).toLocaleTimeString()}
-            </p>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {newerSnapshotAvailable && (
+              <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-0.5 text-[11px] font-semibold text-cyan-200">
+                Newer /m11 snapshot received — reload with START
+              </span>
+            )}
+            <span
+              data-testid="data-source-badge"
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${
+                badgeSource === 'live'
+                  ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300'
+                  : 'border-amber-400/40 bg-amber-400/10 text-amber-300'
+              }`}
+              title={
+                badgeSource === 'live'
+                  ? 'Grid mirrors the observed read-only /m11 snapshot (same data APP 2 reads)'
+                  : 'Locally generated simulation data — not from Firebase'
+              }
+            >
+              <span
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 rounded-full ${
+                  badgeSource === 'live' ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+              />
+              {badgeSource === 'live' ? 'Firebase — Read Only' : 'Demo / Local Simulation'}
+            </span>
+            {round && (
+              <p className="text-xs tabular-nums text-slate-600">
+                {round.source === 'live'
+                  ? `live /m11 · received ${new Date(round.createdAt).toLocaleTimeString()}`
+                  : `seed ${round.seed} · generated ${new Date(round.createdAt).toLocaleTimeString()}`}
+              </p>
+            )}
+          </div>
         </div>
 
         <ActionButtons phase={phase} onStart={handleStart} onShow={handleShow} />
@@ -150,7 +255,7 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
           </p>
         )}
 
-        {/* Generating overlay message (kept inline above the grid to avoid layout shift) */}
+        {/* Generating overlay message (demo mode only — live START is instant) */}
         {phase === 'generating' && (
           <p className="flex items-center justify-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-center text-sm font-medium text-cyan-200 animate-pulse-soft">
             {START_MESSAGES[messageIndex]}
@@ -160,7 +265,12 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
           </p>
         )}
 
-        <GameGrid rows={round?.rows ?? null} phase={phase} revealedRows={revealedRows} />
+        <GameGrid
+          rows={round?.rows ?? null}
+          phase={phase}
+          revealedRows={revealedRows}
+          nextSource={nextSource}
+        />
 
         {/* Reveal progress */}
         {(phase === 'revealing' || phase === 'revealed') && (
