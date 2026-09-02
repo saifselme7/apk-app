@@ -6,6 +6,7 @@ import {
   REVEAL_ROW_DELAY_MS,
   START_SIMULATION_MS,
 } from '../config/game'
+import { generateDemoRound } from '../utils/generator'
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -178,6 +179,41 @@ describe('Console screen', () => {
     expect(screen.getByRole('button', { name: /show/i })).toBeEnabled()
     // New round starts fully hidden again.
     expect(screen.queryByText(/revealed/i)).not.toBeInTheDocument()
+  })
+
+  it('SHOW reveals EXACTLY the generated demo round, cell by cell (seed read from the UI)', () => {
+    render(<Console operatorId="op-1" onLogout={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /new demo round/i }))
+    act(() => {
+      vi.advanceTimersByTime(START_SIMULATION_MS)
+    })
+
+    // The console displays the round's seed — use it to rebuild the exact
+    // expected round via the real generator (no mocks involved).
+    const meta = screen.getByText(/seed \d+/).textContent ?? ''
+    const seed = Number(meta.match(/seed (\d+)/)?.[1])
+    expect(Number.isFinite(seed)).toBe(true)
+    const expected = generateDemoRound(seed)
+    const expectedNode = expected.node as unknown as Record<string, Record<string, '0' | '1'>>
+
+    fireEvent.click(screen.getByRole('button', { name: /show/i }))
+    advanceRevealTicks(GRID_ROWS)
+
+    const revealed: Record<string, string> = {}
+    for (const cell of screen.getAllByRole('img')) {
+      const match = (cell.getAttribute('aria-label') ?? '').match(/^Position (m\d+) — (safe|bomb)$/)
+      if (match) revealed[match[1]] = match[2]
+    }
+    expect(Object.keys(revealed)).toHaveLength(50)
+    for (let n = 1; n <= 50; n += 1) {
+      const key = `m${n}`
+      const expectedCell = expectedNode[key][key]
+      expect(revealed[key], `${key} must match the generated round`).toBe(
+        expectedCell === '1' ? 'safe' : 'bomb',
+      )
+    }
+    expect(screen.getByText(/18 safe cells/i)).toBeInTheDocument()
   })
 
   it('logout button calls onLogout', () => {

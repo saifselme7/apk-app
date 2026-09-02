@@ -126,7 +126,15 @@ and crashes on a missing child. Any future publishing must satisfy:
 All writes (once a later phase enables them) go through the single guarded
 service `src/services/m11.ts`, which enforces the path allowlist above.
 The generator's safe-cell curve per row is `1, 1, 1, 1, 2, 2, 2, 2, 2, 4`
-(row 1 easiest ×1.23 … row 10 ×349.68).
+(row 1 easiest ×1.23 … row 10 ×349.68). This is **exactly the original
+operator app's algorithm** (Phase-1 audit F4, smali-verified: rows 1–4
+exactly 1 safe cell, rows 5–9 exactly 2, row 10 exactly 4 — uniform
+placement, no odds tuning), so every demo round contains exactly 18 safe
+cells and is deterministic per seed. Note: a live `/m11` round **may** show
+a different distribution if it was created/edited outside that algorithm —
+e.g. the round observed in Phase 4 had rows 8–9 with 3 safe cells (20
+total), which the audited algorithm cannot produce. Demo rounds never copy
+or write Firebase data; they are pure local simulation.
 
 ## Project layout
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CELL_COUNT, GRID_COLS, M_KEYS, ROWS, SAFE_CELL_CURVE } from '../config/game'
 import { createRng, generateDemoRound, nodeToRows } from './generator'
+import { evaluateM11Snapshot, liveValuesToRows } from './m11Snapshot'
 import { rowSafeCounts, validateM11Node } from './validation'
 import type { M11Node } from '../types/game'
 
@@ -105,5 +106,24 @@ describe('rowSafeCounts', () => {
     const counts = rowSafeCounts(node)
     expect(counts).toHaveLength(10)
     expect(counts.reduce((sum, count) => sum + count, 0)).toBe(18)
+  })
+})
+
+describe('demo generator ↔ live snapshot structural parity', () => {
+  it('produces rounds indistinguishable from a live /m11 snapshot: same validator, same m1…m50 row mapping', () => {
+    for (const seed of [1, 42, 999, 123456]) {
+      const round = generateDemoRound(seed)
+      // Wire format identical to what onValue delivers for /m11:
+      const raw = Object.fromEntries(M_KEYS.map((key) => [key, round.node[key]]))
+
+      const evaluation = evaluateM11Snapshot(raw)
+      expect(evaluation.status).toBe('valid')
+      expect(evaluation.present).toHaveLength(50)
+      expect(evaluation.safeCount).toBe(18)
+
+      // The live mapper must reproduce the generator's own row view EXACTLY
+      // (same ROWS config, same ordering, same "1"/"0" semantics).
+      expect(liveValuesToRows(evaluation.values)).toEqual(nodeToRows(round.node))
+    }
   })
 })
