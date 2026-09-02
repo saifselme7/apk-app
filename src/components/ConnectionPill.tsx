@@ -2,7 +2,7 @@ import { AlertTriangle, Plug, PlugZap } from 'lucide-react'
 import type { FirebaseConnectionState } from '../types/game'
 
 const LABELS: Record<FirebaseConnectionState, string> = {
-  unconfigured: 'Offline demo mode',
+  unconfigured: 'Not configured · offline demo',
   connecting: 'DB connecting…',
   connected: 'DB connected · read-only',
   disconnected: 'DB disconnected',

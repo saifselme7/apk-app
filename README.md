@@ -55,11 +55,28 @@ Two modes:
 
 1. **Offline demo mode (default when `VITE_FIREBASE_API_KEY` is empty)** —
    zero Firebase network activity. Everything (grid, rounds, online-user
-   counter) is simulated locally.
+   counter) is simulated locally, and the demo generator works fully.
 2. **Read-only live mode** — with the required values present
    (`apiKey`, `databaseURL`, `projectId`), the console attaches a
-   **read-only** live mirror to `/m11` and shows a DB status pill.
-   It never writes.
+   **read-only** `onValue` listener to `/m11` (m1–m50). Every snapshot is
+   validated against the `{ mN: "0" | "1" }` contract and the DB status
+   panel shows:
+
+   | State                    | Meaning                                                  |
+   | ------------------------ | -------------------------------------------------------- |
+   | Not configured           | no `.env` → offline demo mode                            |
+   | Connecting               | SDK connecting (`.info/connected` probe)                 |
+   | Connected (read-only)    | attached; observing `/m11`                               |
+   | Disconnected / Error     | connection lost / probe or listener failure              |
+   | /m11 sync: Syncing…      | attached, waiting for the first snapshot                 |
+   | /m11 sync: Empty         | node exists with no children — warning shown, no repair  |
+   | /m11 sync: Incomplete    | some of m1–m50 missing — keys listed, never created      |
+   | /m11 sync: Invalid data  | malformed children listed; nothing repaired or overwritten |
+   | /m11 sync: In sync       | 50/50 keys valid + safe/bomb counts                      |
+
+   Missing, empty, or malformed data is **reported, never repaired** — the
+   app contains no Firebase write call at all (statically audited by a
+   unit test that scans the whole `src/` tree).
 
 Never commit `.env`. Only placeholders belong in `.env.example`.
 

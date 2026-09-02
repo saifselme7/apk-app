@@ -11,6 +11,15 @@ beforeEach(() => {
   vi.useFakeTimers()
 })
 
+// Deterministic offline demo mode for these tests, regardless of any local .env.
+vi.mock('../services/firebase', () => ({
+  isFirebaseConfigured: () => false,
+  subscribeToConnectionState: () => () => undefined,
+  getDemoDatabase: () => {
+    throw new Error('Firebase is intentionally not configured in Console tests')
+  },
+}))
+
 afterEach(() => {
   cleanup()
   vi.useRealTimers()

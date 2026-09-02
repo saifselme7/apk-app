@@ -18,9 +18,6 @@ export type M11ChildRecord = Readonly<Record<string, M11Value>>
 /** A complete, validated /m11 node: all 50 children present. */
 export type M11Node = { readonly [K in MKey]: M11Child<K> }
 
-/** Partial node as observed from a live read-only listener. */
-export type M11Snapshot = Partial<Record<MKey, M11Value | null>>
-
 /** A single grid cell in the UI view model. */
 export interface CellView {
   readonly key: MKey

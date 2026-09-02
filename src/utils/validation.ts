@@ -1,5 +1,5 @@
 import { M_KEYS, ROWS } from '../config/game'
-import type { M11ChildRecord, M11Node } from '../types/game'
+import type { M11ChildRecord, M11Node, M11Value } from '../types/game'
 
 export type Validation = { valid: true } | { valid: false; errors: string[] }
 
@@ -15,6 +15,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function describe(value: unknown): string {
   const json = JSON.stringify(value)
   return json === undefined ? String(value) : json
+}
+
+export type ChildValidation =
+  | { valid: true; value: M11Value }
+  | { valid: false; error: string }
+
+/**
+ * Validates ONE child of /m11 against the frozen contract:
+ *   /m11/mN must store { mN: "0" | "1" } — object with exactly one entry,
+ *   whose key equals the child name and whose value is the STRING "0"/"1".
+ * Shared by the whole-node validator and the live read-only mirror.
+ */
+export function validateM11Child(key: string, child: unknown): ChildValidation {
+  if (!isRecord(child)) {
+    return {
+      valid: false,
+      error: `"${key}" must be an object like { "${key}": "0" | "1" }, got ${describe(child)}.`,
+    }
+  }
+  const childKeys = Object.keys(child)
+  if (childKeys.length !== 1) {
+    return {
+      valid: false,
+      error: `"${key}" must contain exactly one entry, got ${childKeys.length}.`,
+    }
+  }
+  const innerKey = childKeys[0]
+  if (innerKey !== key) {
+    return {
+      valid: false,
+      error: `"${key}" has a mismatched inner key "${innerKey}".`,
+    }
+  }
+  if (!isM11Value(child[innerKey])) {
+    return {
+      valid: false,
+      error: `"${key}" must be the string "0" or "1", got ${describe(child[innerKey])}.`,
+    }
+  }
+  return { valid: true, value: child[innerKey] }
 }
 
 /**
@@ -36,23 +76,9 @@ export function validateM11Node(node: unknown): Validation {
       errors.push(`Missing key "${key}".`)
       continue
     }
-    const child = node[key]
-    if (!isRecord(child)) {
-      errors.push(`"${key}" must be an object like { "${key}": "0" | "1" }, got ${describe(child)}.`)
-      continue
-    }
-    const childKeys = Object.keys(child)
-    if (childKeys.length !== 1) {
-      errors.push(`"${key}" must contain exactly one entry, got ${childKeys.length}.`)
-      continue
-    }
-    const innerKey = childKeys[0]
-    if (innerKey !== key) {
-      errors.push(`"${key}" has a mismatched inner key "${innerKey}".`)
-      continue
-    }
-    if (!isM11Value(child[innerKey])) {
-      errors.push(`"${key}" must be the string "0" or "1", got ${describe(child[innerKey])}.`)
+    const result = validateM11Child(key, node[key])
+    if (!result.valid) {
+      errors.push(result.error)
     }
   }
 
