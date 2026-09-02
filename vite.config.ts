@@ -7,6 +7,8 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // Allow the sandbox preview host so the live demo is reachable in-browser.
+    allowedHosts: ['.e2b.app'],
   },
   preview: {
     host: true,
