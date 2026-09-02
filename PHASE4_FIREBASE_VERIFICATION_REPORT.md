@@ -124,7 +124,7 @@ built in ~3 s.
 **No code changes were required** — Phase 3 already contained the full
 read-only implementation, so per instructions **no feature commit** was
 created. The only commit is this report (docs-only, titled
-`75d32ce`). `.env` remains local-only.
+"docs: add phase 4 firebase verification report"). `.env` remains local-only.
 
 ### 13. Confirmation that Firebase data was NOT modified
 
