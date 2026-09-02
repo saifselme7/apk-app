@@ -58,35 +58,42 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
   // The badge always reflects the round actually on screen, if there is one.
   const badgeSource: RoundSource = round?.source ?? nextSource
 
-  // START — in live mode freeze the observed snapshot; never generate.
-  const handleStart = useCallback(() => {
+  // LOAD LIVE ROUND — freeze the observed read-only /m11 snapshot.
+  // Never generates; replaces whatever round is held, wholesale.
+  const handleLoadLive = useCallback(() => {
     if (phase === 'generating' || phase === 'revealing') return
+    if (!liveReady || !mirror.evaluation) return
     setError(null)
     setRevealedRows(0)
 
-    if (liveReady && mirror.evaluation) {
-      // The snapshot is already subscribed locally — load it instantly.
-      // No random generation, no Firebase interaction of any kind.
-      try {
-        setRound({
-          source: 'live',
-          createdAt: mirror.lastUpdated ?? Date.now(),
-          rows: liveValuesToRows(mirror.evaluation.values),
-        })
-        setPhase('ready')
-      } catch (cause) {
-        console.error('[demo] live snapshot mapping failed', cause)
-        setRound(null)
-        setPhase('idle')
-        setError('The live /m11 snapshot could not be mapped onto the grid. No data was changed.')
-      }
-      return
+    // The snapshot is already subscribed locally — load it instantly.
+    // No random generation, no Firebase interaction of any kind.
+    try {
+      setRound({
+        source: 'live',
+        createdAt: mirror.lastUpdated ?? Date.now(),
+        rows: liveValuesToRows(mirror.evaluation.values),
+      })
+      setPhase('ready')
+    } catch (cause) {
+      console.error('[demo] live snapshot mapping failed', cause)
+      setRound(null)
+      setPhase('idle')
+      setError('The live /m11 snapshot could not be mapped onto the grid. No data was changed.')
     }
+  }, [phase, liveReady, mirror.evaluation, mirror.lastUpdated])
 
-    // DEMO mode — existing local simulation.
+  // NEW DEMO ROUND — local simulation only; completely independent from
+  // Firebase (never read for this path, never written). Replaces the
+  // previous held round wholesale.
+  const handleNewDemo = useCallback(() => {
+    if (phase === 'generating' || phase === 'revealing') return
+    setError(null)
     setRound(null)
+    setRevealedRows(0)
     setMessageIndex(0)
     setPhase('generating')
+
     window.setTimeout(() => {
       try {
         const next = generateDemoRound()
@@ -96,10 +103,10 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
         // Details stay in the console log; the UI shows a friendly message.
         console.error('[demo] generator failure', cause)
         setPhase('idle')
-        setError('The demo generator failed to create a valid round. Please try START again.')
+        setError('The demo generator failed to create a valid round. Please try again.')
       }
     }, START_SIMULATION_MS)
-  }, [phase, liveReady, mirror.evaluation, mirror.lastUpdated])
+  }, [phase])
 
   // Cycle the loading messages while "connecting" (visual parity, clearly a demo).
   useEffect(() => {
@@ -169,8 +176,8 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
   function statusLine(): string {
     if (phase === 'idle') {
       return liveReady
-        ? 'Live /m11 snapshot available — press START to load it.'
-        : 'No round yet — press START.'
+        ? 'Live /m11 snapshot available — load it, or start a new demo round.'
+        : 'No round yet — start a new demo round.'
     }
     if (phase === 'generating') return 'Preparing demo round…'
     if (phase === 'ready') {
@@ -180,8 +187,8 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
     }
     if (phase === 'revealing') return 'Revealing result…'
     return round?.source === 'live'
-      ? 'Live round complete — press START to reload the current /m11.'
-      : 'Round complete — press START for a new round.'
+      ? 'Live round complete — load the current /m11 again or start a new demo round.'
+      : 'Demo round complete — start another new demo round.'
   }
 
   return (
@@ -243,7 +250,13 @@ export function Console({ operatorId, onLogout }: ConsoleProps) {
           </div>
         </div>
 
-        <ActionButtons phase={phase} onStart={handleStart} onShow={handleShow} />
+        <ActionButtons
+          phase={phase}
+          liveReady={liveReady}
+          onLoadLive={handleLoadLive}
+          onNewDemo={handleNewDemo}
+          onShow={handleShow}
+        />
 
         {error && (
           <p

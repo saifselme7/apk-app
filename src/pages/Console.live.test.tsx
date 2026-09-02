@@ -53,6 +53,14 @@ function snapshotWithSafe(safeKeys: string[], receivedAt: number) {
   return { evaluation: evaluateM11Snapshot(raw), receivedAt }
 }
 
+/** A deterministic local demo round for the generator mock. */
+function demoRoundMock(safeKeys: string[], seed: number) {
+  const values: Partial<Record<string, '0' | '1'>> = {}
+  for (let n = 1; n <= 50; n += 1) values[`m${n}`] = '0'
+  for (const key of safeKeys) values[key] = '1'
+  return { seed, createdAt: seed * 1000, rows: liveValuesToRows(values) }
+}
+
 /** Currently revealed cells as a map key → 'safe' | 'bomb'. */
 function revealedCellMap(): Record<string, string> {
   const map: Record<string, string> = {}
@@ -96,7 +104,7 @@ describe('Console — live Firebase mirror mode', () => {
     // Live mode announced before any round is loaded.
     expect(screen.getByTestId('data-source-badge')).toHaveTextContent(/Firebase — Read Only/i)
 
-    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    fireEvent.click(screen.getByRole('button', { name: /load live round/i }))
     expect(screen.getByText(/Live \/m11 round loaded/i)).toBeInTheDocument()
     // Instant load: no generating phase, round ready immediately.
     expect(screen.queryByText(/Generating 50 positions/i)).not.toBeInTheDocument()
@@ -121,7 +129,7 @@ describe('Console — live Firebase mirror mode', () => {
     act(() => {
       listeners.current?.onUpdate(snapshotWithSafe(['m3'], 1))
     })
-    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    fireEvent.click(screen.getByRole('button', { name: /load live round/i }))
     fireEvent.click(screen.getByRole('button', { name: /show/i }))
     revealAll()
     expect(generateMock).not.toHaveBeenCalled()
@@ -132,7 +140,7 @@ describe('Console — live Firebase mirror mode', () => {
     act(() => {
       listeners.current?.onUpdate(snapshotWithSafe(['m1'], 1_000))
     })
-    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    fireEvent.click(screen.getByRole('button', { name: /load live round/i }))
     expect(screen.getByText(/Live \/m11 round loaded/i)).toBeInTheDocument()
 
     // Operator app publishes a new round → new snapshot event.
@@ -153,7 +161,7 @@ describe('Console — live Firebase mirror mode', () => {
     act(() => {
       listeners.current?.onUpdate(snapshotWithSafe(['m1'], 1_000))
     })
-    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    fireEvent.click(screen.getByRole('button', { name: /load live round/i }))
     fireEvent.click(screen.getByRole('button', { name: /show/i }))
 
     // Reveal 3 rows, then the database changes underneath.
@@ -194,7 +202,7 @@ describe('Console — live Firebase mirror mode', () => {
 
     expect(screen.getByTestId('data-source-badge')).toHaveTextContent(/Demo \/ Local Simulation/i)
 
-    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    fireEvent.click(screen.getByRole('button', { name: /new demo round/i }))
     act(() => {
       vi.advanceTimersByTime(2000) // START_SIMULATION_MS
     })
@@ -210,5 +218,109 @@ describe('Console — live Firebase mirror mode', () => {
     })
     expect(screen.getByText(/Disabled \(phase boundary\)/i)).toBeInTheDocument()
     expect(screen.getByTestId('m11-sync-status')).toHaveTextContent(/In sync/i)
+  })
+  it('NEW DEMO ROUND works while a live snapshot is valid and stays independent from Firebase', () => {
+    generateMock.mockImplementationOnce(() => demoRoundMock(['m1'], 42))
+    render(<Console operatorId="op-live" onLogout={vi.fn()} />)
+    act(() => {
+      listeners.current?.onUpdate(snapshotWithSafe(['m2', 'm3'], 1_000))
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /new demo round/i }))
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+
+    expect(generateMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByText(/Demo round ready/i)).toBeInTheDocument()
+    expect(screen.getByTestId('data-source-badge')).toHaveTextContent(/Demo \/ Local Simulation/i)
+
+    fireEvent.click(screen.getByRole('button', { name: /show/i }))
+    revealAll()
+    const cells = revealedCellMap()
+    // The revealed round is the MOCKED local round — NOT the live snapshot.
+    expect(cells.m1).toBe('safe')
+    expect(cells.m2).toBe('bomb')
+    expect(cells.m3).toBe('bomb')
+    expect(screen.getByText(/1 safe cells/i)).toBeInTheDocument()
+  })
+
+  it('a Firebase snapshot arriving during a demo reveal does NOT mutate the demo round', () => {
+    generateMock.mockImplementationOnce(() => demoRoundMock(['m1'], 7))
+    render(<Console operatorId="op-live" onLogout={vi.fn()} />)
+    act(() => {
+      listeners.current?.onUpdate(snapshotWithSafe(['m2'], 1_000))
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /new demo round/i }))
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    fireEvent.click(screen.getByRole('button', { name: /show/i }))
+
+    for (let i = 0; i < 3; i += 1) {
+      act(() => {
+        vi.advanceTimersByTime(REVEAL_ROW_DELAY_MS)
+      })
+    }
+    // New live data arrives mid-reveal.
+    act(() => {
+      listeners.current?.onUpdate(snapshotWithSafe(['m50'], 9_000))
+    })
+    revealAll()
+
+    const cells = revealedCellMap()
+    expect(cells.m1).toBe('safe') // still the frozen demo round
+    expect(cells.m2).toBe('bomb')
+    expect(cells.m50).toBe('bomb')
+    expect(screen.getByTestId('data-source-badge')).toHaveTextContent(/Demo \/ Local Simulation/i)
+  })
+
+  it('a second NEW DEMO ROUND replaces the previous demo round completely', () => {
+    generateMock.mockImplementationOnce(() => demoRoundMock(['m1'], 1))
+    generateMock.mockImplementationOnce(() => demoRoundMock(['m50'], 2))
+    render(<Console operatorId="op-live" onLogout={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /new demo round/i }))
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    // Second demo round replaces the first wholesale.
+    fireEvent.click(screen.getByRole('button', { name: /new demo round/i }))
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(generateMock).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(screen.getByRole('button', { name: /show/i }))
+    revealAll()
+    const cells = revealedCellMap()
+    expect(cells.m1).toBe('bomb') // round ONE's safe cell is gone
+    expect(cells.m50).toBe('safe') // round TWO's safe cell is present
+  })
+
+  it('LOAD LIVE ROUND replaces a held demo round completely', () => {
+    generateMock.mockImplementationOnce(() => demoRoundMock(['m1'], 5))
+    render(<Console operatorId="op-live" onLogout={vi.fn()} />)
+    act(() => {
+      listeners.current?.onUpdate(snapshotWithSafe(['m2', 'm3'], 1_000))
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /new demo round/i }))
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(screen.getByTestId('data-source-badge')).toHaveTextContent(/Demo \/ Local Simulation/i)
+
+    fireEvent.click(screen.getByRole('button', { name: /load live round/i }))
+    expect(screen.getByText(/Live \/m11 round loaded/i)).toBeInTheDocument()
+    expect(screen.getByTestId('data-source-badge')).toHaveTextContent(/Firebase — Read Only/i)
+
+    fireEvent.click(screen.getByRole('button', { name: /show/i }))
+    revealAll()
+    const cells = revealedCellMap()
+    expect(cells.m1).toBe('bomb') // demo round's safe cell is gone
+    expect(cells.m2).toBe('safe') // live snapshot's cells are shown
+    expect(cells.m3).toBe('safe')
   })
 })

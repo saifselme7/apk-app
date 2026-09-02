@@ -1,54 +1,76 @@
-import { Check, Dices, Eye, Loader2, RefreshCw } from 'lucide-react'
+import { Check, Dices, Download, Eye, Loader2 } from 'lucide-react'
 import type { RoundPhase } from '../types/game'
 
 export interface ActionButtonsProps {
   phase: RoundPhase
-  onStart: () => void
+  /** True when the live /m11 snapshot is valid (50/50) and can be loaded. */
+  liveReady: boolean
+  onLoadLive: () => void
+  onNewDemo: () => void
   onShow: () => void
 }
 
 const BASE_BUTTON =
-  'inline-flex h-[52px] flex-1 min-w-[150px] items-center justify-center gap-2.5 rounded-2xl px-6 text-base font-extrabold uppercase tracking-wider transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:min-w-[210px]'
+  'inline-flex h-[52px] flex-1 min-w-[150px] items-center justify-center gap-2.5 rounded-2xl px-5 text-base font-extrabold uppercase tracking-wider transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:min-w-[190px]'
 
-/** START (generate demo round) and SHOW (progressive reveal) controls. */
-export function ActionButtons({ phase, onStart, onShow }: ActionButtonsProps) {
-  const startDisabled = phase === 'generating' || phase === 'revealing'
-  const showDisabled = phase !== 'ready'
+/**
+ * Three clearly separated actions:
+ * - LOAD LIVE ROUND  — freeze the observed read-only /m11 snapshot (green,
+ *   matching the "Firebase — Read Only" badge; only enabled when the live
+ *   snapshot is valid 50/50).
+ * - NEW DEMO ROUND   — generate a fresh LOCAL simulation round (never
+ *   touches Firebase).
+ * - SHOW             — progressive reveal of whichever round is held.
+ */
+export function ActionButtons({ phase, liveReady, onLoadLive, onNewDemo, onShow }: ActionButtonsProps) {
+  const busy = phase === 'generating' || phase === 'revealing'
   const revealing = phase === 'revealing'
 
-  const startLabel =
-    phase === 'generating'
-      ? 'Preparing…'
-      : phase === 'idle'
-        ? 'Start'
-        : 'Start new round'
+  const liveDisabled = !liveReady || busy
+  const demoDisabled = busy
+  const showDisabled = phase !== 'ready'
 
-  const showLabel = revealing ? 'Revealing…' : phase === 'revealed' ? 'Result shown' : 'Show'
+  const liveTitle = !liveReady
+    ? 'The live /m11 snapshot is not currently valid/available — see the database panel below.'
+    : busy
+      ? 'Unavailable while a round is generating or revealing.'
+      : 'Freeze the current read-only /m11 snapshot (same data APP 2 displays).'
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-center">
       <button
         type="button"
-        onClick={onStart}
-        disabled={startDisabled}
-        aria-label={startLabel}
-        className={`${BASE_BUTTON} bg-gradient-to-r from-cyan-400 to-teal-500 text-slate-950 shadow-lg shadow-cyan-500/20 hover:from-cyan-300 hover:to-teal-400 hover:shadow-cyan-400/30 focus-visible:outline-cyan-300 active:scale-[0.98]`}
+        onClick={onLoadLive}
+        disabled={liveDisabled}
+        aria-label="Load Live Round"
+        title={liveTitle}
+        className={`${BASE_BUTTON} bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 shadow-lg shadow-emerald-500/20 hover:from-emerald-300 hover:to-teal-400 hover:shadow-emerald-400/30 focus-visible:outline-emerald-300 active:scale-[0.98]`}
+      >
+        <Download aria-hidden="true" className="h-5 w-5" />
+        Load Live Round
+      </button>
+
+      <button
+        type="button"
+        onClick={onNewDemo}
+        disabled={demoDisabled}
+        aria-label={phase === 'generating' ? 'Preparing demo round' : 'New Demo Round'}
+        title="Generate a fresh LOCAL demo round — never touches Firebase."
+        className={`${BASE_BUTTON} bg-gradient-to-r from-cyan-400 to-sky-500 text-slate-950 shadow-lg shadow-cyan-500/20 hover:from-cyan-300 hover:to-sky-400 hover:shadow-cyan-400/30 focus-visible:outline-cyan-300 active:scale-[0.98]`}
       >
         {phase === 'generating' ? (
           <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
-        ) : phase === 'idle' ? (
-          <Dices aria-hidden="true" className="h-5 w-5" />
         ) : (
-          <RefreshCw aria-hidden="true" className="h-5 w-5" />
+          <Dices aria-hidden="true" className="h-5 w-5" />
         )}
-        {startLabel}
+        {phase === 'generating' ? 'Preparing…' : 'New Demo Round'}
       </button>
 
       <button
         type="button"
         onClick={onShow}
         disabled={showDisabled}
-        aria-label={showLabel}
+        aria-label={revealing ? 'Revealing…' : phase === 'revealed' ? 'Result shown' : 'Show'}
         className={`${BASE_BUTTON} border-2 border-amber-400/70 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20 focus-visible:outline-amber-300 active:scale-[0.98]`}
       >
         {revealing ? (
@@ -58,7 +80,7 @@ export function ActionButtons({ phase, onStart, onShow }: ActionButtonsProps) {
         ) : (
           <Eye aria-hidden="true" className="h-5 w-5" />
         )}
-        {showLabel}
+        {revealing ? 'Revealing…' : phase === 'revealed' ? 'Result shown' : 'Show'}
       </button>
     </div>
   )

@@ -26,7 +26,7 @@ afterEach(() => {
 })
 
 function startRound() {
-  fireEvent.click(screen.getByRole('button', { name: /start/i }))
+  fireEvent.click(screen.getByRole('button', { name: /new demo round/i }))
   act(() => {
     vi.advanceTimersByTime(START_SIMULATION_MS)
   })
@@ -69,13 +69,15 @@ describe('Console screen', () => {
     expect(screen.getByText(/Disabled \(phase boundary\)/i)).toBeInTheDocument()
   })
 
-  it('SHOW is disabled before START generates a round', () => {
+  it('SHOW is disabled before a round exists; LOAD LIVE ROUND is disabled offline', () => {
     render(<Console operatorId="op-1" onLogout={vi.fn()} />)
     expect(screen.getByRole('button', { name: /show/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /start/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /new demo round/i })).toBeEnabled()
+    // Offline: there is no live round to load.
+    expect(screen.getByRole('button', { name: /load live round/i })).toBeDisabled()
   })
 
-  it('START generates a validated 50-position round and then enables SHOW', () => {
+  it('NEW DEMO ROUND generates a validated 50-position round and then enables SHOW', () => {
     render(<Console operatorId="op-1" onLogout={vi.fn()} />)
 
     startRound()
@@ -85,13 +87,14 @@ describe('Console screen', () => {
     const cells = screen.getAllByRole('img')
     expect(cells).toHaveLength(50)
     expect(screen.getByRole('button', { name: /show/i })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /start new round/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /new demo round/i })).toBeEnabled()
+    expect(screen.getByTestId('data-source-badge')).toHaveTextContent(/Demo \/ Local Simulation/i)
   })
 
-  it('START keeps SHOW disabled while the round is being prepared', () => {
+  it('NEW DEMO ROUND keeps SHOW disabled while the round is being prepared', () => {
     render(<Console operatorId="op-1" onLogout={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    fireEvent.click(screen.getByRole('button', { name: /new demo round/i }))
     expect(screen.getByRole('button', { name: /show/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /preparing/i })).toBeDisabled()
 
@@ -162,7 +165,7 @@ describe('Console screen', () => {
     expect(safeFinal).toBe(18)
   })
 
-  it('a second START after a completed round builds a fresh round and resets SHOW', () => {
+  it('a second NEW DEMO ROUND after a completed round builds a fresh round and resets SHOW', () => {
     render(<Console operatorId="op-1" onLogout={vi.fn()} />)
 
     startRound()

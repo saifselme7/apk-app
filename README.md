@@ -85,23 +85,28 @@ Two modes:
    app contains no Firebase write call at all (statically audited by a
    unit test that scans the whole `src/` tree).
 
-### Grid data source (Phase 5A)
+### Grid data source (Phase 5A + explicit dual actions)
 
 The console has two strictly separated data sources, always shown by the
-badge next to the status line:
+badge next to the status line, with **one explicit action each**:
 
-- **Firebase — Read Only** (green): entered when Firebase is configured
-  **and** `/m11` is currently valid (50/50 keys). START freezes the
-  observed snapshot into the round — nothing is generated — so the grid
-  mirrors **exactly** what the Android demo client displays. SHOW reveals
-  that frozen snapshot progressively. If a newer snapshot arrives while
-  the round is held but not yet shown, it is replaced wholesale; during a
-  reveal the round stays frozen (a hint points out newer data).
-- **Demo / Local Simulation** (amber): used whenever Firebase is not
-  configured or `/m11` is empty/incomplete/invalid. START uses the local
-  demo generator and the round is clearly labelled as simulated.
+- **LOAD LIVE ROUND** → **"Firebase — Read Only"** (green badge): enabled
+  when Firebase is configured **and** `/m11` is currently valid (50/50
+  keys). It freezes the observed snapshot into the round — nothing is
+  generated — so the grid mirrors **exactly** what the Android demo client
+  displays. SHOW reveals that frozen snapshot progressively. If a newer
+  snapshot arrives while the live round is held but not yet shown, it is
+  replaced wholesale; during a reveal the round stays frozen (a hint
+  points out newer data).
+- **NEW DEMO ROUND** → **"Demo / Local Simulation"** (amber badge): always
+  available (except mid-generation/mid-reveal). Generates a fresh local
+  round with the demo generator — completely independent from Firebase
+  (never read for this path, never written) — and SHOW reveals it. A new
+  demo round replaces the previous held round wholesale; live snapshots
+  arriving mid-reveal never mutate it.
 
-Locally generated data is never presented as Firebase data.
+Locally generated data is never presented as Firebase data. Firebase stays
+strictly read-only: no write path exists anywhere in the app.
 
 Never commit `.env`. Only placeholders belong in `.env.example`.
 

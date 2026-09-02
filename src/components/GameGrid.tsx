@@ -124,19 +124,19 @@ export function GameGrid({ rows, phase, revealedRows, nextSource = 'demo' }: Gam
           <p className="max-w-xs text-sm font-medium text-slate-300">
             {nextSource === 'live' ? (
               <>
-                Press <span className="font-bold text-emerald-300">START</span> to load the
-                current live /m11 round.
+                Press <span className="font-bold text-emerald-300">LOAD LIVE ROUND</span> to
+                mirror the current /m11 round.
               </>
             ) : (
               <>
-                Press <span className="font-bold text-cyan-300">START</span> to generate a demo
-                round.
+                Press <span className="font-bold text-cyan-300">NEW DEMO ROUND</span> to
+                generate a local demo round.
               </>
             )}
           </p>
           <p className="max-w-xs text-xs text-slate-500">
             {nextSource === 'live'
-              ? 'The grid will mirror exactly what the Android demo client reads from Firebase — nothing is written.'
+              ? 'The grid will mirror exactly what the Android demo client reads from Firebase — or use NEW DEMO ROUND for a local simulation. Nothing is written either way.'
               : 'Nothing is written anywhere — results stay in this browser until publishing is explicitly enabled in a later phase.'}
           </p>
         </div>
